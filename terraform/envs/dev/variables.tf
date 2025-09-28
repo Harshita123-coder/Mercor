@@ -30,7 +30,7 @@ variable "health_path" {
 
 variable "instance_type" {
   type    = string
-  default = "t3.small"
+  default = "t3.medium"  # Upgraded from t3.small for zero-downtime test
 }
 
 variable "desired_capacity" {
