@@ -36,12 +36,12 @@ variable "instance_type" {
 
 variable "desired_capacity" {
   type    = number
-  default = 2
+  default = 3  # Scaled up from 2 to test zero-downtime scaling
 }
 
 variable "max_capacity" {
   type    = number
-  default = 4
+  default = 6  # Increased max capacity to support scaling test
 }
 
 variable "ami_id" {
@@ -57,7 +57,7 @@ variable "ecr_repo_name" {
 # Test variables for zero-downtime infrastructure updates
 variable "test_environment" {
   type        = string
-  default     = "staging"  # Changed from production to staging
+  default     = "production"  # Changed back to production for scaling test
   description = "Environment label for testing infrastructure changes"
 }
 
