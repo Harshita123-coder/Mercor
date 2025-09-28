@@ -252,12 +252,7 @@ jobs:
               echo "⚠️ No monitoring data available"
               echo "ZERO_DOWNTIME=unknown" >> $GITHUB_OUTPUT
             else
-              if [ "$total_checks" -gt 0 ]; then
-                failure_percentage=$((failed_count * 100 / total_checks))
-                echo "⚠️ DOWNTIME DETECTED: $failed_count failures out of $total_checks checks (${failure_percentage}%)"
-              else
-                echo "⚠️ DOWNTIME DETECTED: $failed_count failures"
-              fi
+              echo "⚠️ DOWNTIME DETECTED: $failed_count failures out of $total_checks checks"
               echo "ZERO_DOWNTIME=false" >> $GITHUB_OUTPUT
             fi
           else
