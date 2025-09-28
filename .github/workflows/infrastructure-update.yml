@@ -69,15 +69,36 @@ jobs:
           echo "🐛 DEBUG: Pre-update state check completed"
 
       - name: Apply infrastructure updates
+        id: terraform-apply
         working-directory: terraform/envs/dev
         run: |
           terraform init -input=false
           
-          echo "🚀 Applying infrastructure changes..."
-          terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
+          echo "� Checking current Terraform state..."
+          terraform refresh -input=false || echo "⚠️ Refresh had issues, continuing..."
           
-          echo "✅ Terraform apply completed"
+          echo "�🚀 Planning infrastructure changes..."
+          if terraform plan -out=tfplan -detailed-exitcode; then
+            plan_exit_code=$?
+            if [ $plan_exit_code -eq 2 ]; then
+              echo "📋 Changes detected, applying..."
+              if terraform apply -auto-approve tfplan; then
+                echo "✅ Terraform apply completed successfully"
+                echo "TERRAFORM_SUCCESS=true" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Terraform apply failed"
+                echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
+                exit 1
+              fi
+            else
+              echo "ℹ️ No changes detected, infrastructure is up to date"
+              echo "TERRAFORM_SUCCESS=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Terraform plan failed"
+            echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Monitor service update
         run: |
@@ -126,6 +147,7 @@ jobs:
           fi
 
       - name: Verify zero-downtime update
+        if: steps.terraform-apply.outputs.TERRAFORM_SUCCESS == 'true'
         run: |
           echo "🔍 Post-update verification:"
           
@@ -148,6 +170,21 @@ jobs:
           
           echo "🎉 Zero-downtime infrastructure update completed successfully!"
 
+      - name: Handle terraform failure
+        if: steps.terraform-apply.outputs.TERRAFORM_SUCCESS == 'false'
+        run: |
+          echo "❌ Infrastructure update failed due to Terraform errors"
+          echo "🔍 Common issues:"
+          echo "  - Resources already exist (need to import to state)"
+          echo "  - AWS service subscription required (CodeDeploy)"
+          echo "  - Resource conflicts or permission issues"
+          echo ""
+          echo "💡 Recommendations:"
+          echo "  1. Import existing resources to Terraform state"
+          echo "  2. Enable required AWS services"
+          echo "  3. Use terraform plan to check changes before apply"
+          exit 1
+
       - name: Summary report
         if: always()
         run: |
@@ -155,7 +192,17 @@ jobs:
           echo "⏱️  Start Time: ${{ steps.pre-state.outputs.START_TIME }}"
           echo "⏱️  End Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "🎯 Update Type: ${{ github.event.inputs.update_type || 'fargate_service' }}"
-          echo "🏗️  Infrastructure: Updated via Terraform (Fargate Service)"
-          echo "⚡ Downtime: Zero (verified via continuous monitoring)"
-          echo "🚀 Platform: AWS Fargate (Serverless Containers)"
-          echo "✅ Status: Success"
+          echo "🏗️  Infrastructure: Terraform execution"
+          
+          # Check if terraform was successful
+          terraform_success="${{ steps.terraform-apply.outputs.TERRAFORM_SUCCESS }}"
+          if [ "$terraform_success" = "true" ]; then
+            echo "⚡ Downtime: Zero (verified via continuous monitoring)"
+            echo "🚀 Platform: AWS Fargate (Serverless Containers)"
+            echo "✅ Status: Success"
+          else
+            echo "❌ Terraform Status: Failed"
+            echo "⚠️  Infrastructure: May have resource conflicts"
+            echo "🔧 Action Required: Check terraform state and import existing resources"
+            echo "❌ Status: Failed"
+          fi
