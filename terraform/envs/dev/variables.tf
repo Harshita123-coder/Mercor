@@ -53,3 +53,22 @@ variable "ecr_repo_name" {
   type    = string
   default = "mercor-ecs-demo"
 }
+
+# Test variables for zero-downtime infrastructure updates
+variable "test_environment" {
+  type        = string
+  default     = "production"
+  description = "Environment label for testing infrastructure changes"
+}
+
+variable "monitoring_enabled" {
+  type        = bool
+  default     = true
+  description = "Enable comprehensive monitoring during deployments"
+}
+
+variable "deployment_strategy" {
+  type        = string
+  default     = "blue_green"
+  description = "Deployment strategy for zero-downtime updates"
+}
