@@ -59,17 +59,41 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           EXEC_ROLE_ARN: ${{ steps.infra.outputs.EXEC }}
         run: |
-          # Create updated task definition using our working template
+          # Create Fargate-compatible task definition
           IMG="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          sed -e "s|REPLACE_IMAGE|$IMG|g" \
-              -e "s|REPLACE_EXEC_ROLE_ARN|$EXEC_ROLE_ARN|g" \
-              -e "s|REPLACE_REGION|$AWS_REGION|g" \
-              codedeploy/taskdef.template.json > td.json
+          
+          cat > fargate-taskdef.json << EOF
+          {
+            "family": "mercor-demo-fargate-task",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$EXEC_ROLE_ARN",
+            "containerDefinitions": [
+              {
+                "name": "app",
+                "image": "$IMG",
+                "essential": true,
+                "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
+                "environment": [{"name": "APP_MSG", "value": "Hello from v2 (green) - Blue/Green deployment test!"}],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/mercor-demo",
+                    "awslogs-region": "$AWS_REGION",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
           
           # Register the new task definition
-          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://td.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://fargate-taskdef.json --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "TASK_ARN=$TASK_ARN" >> $GITHUB_ENV
-          echo "New task definition: $TASK_ARN"
+          echo "New Fargate task definition: $TASK_ARN"
 
       - name: Test with Fargate task (bypass CodeDeploy issues)
         env:
