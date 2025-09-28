@@ -3,8 +3,7 @@ name: Infrastructure Update - Zero Downtime (Fixed)
 on:
   push:
     branches: [ main ]
-    paths:
-      - "terraform/**"
+    # Removed paths filter - now runs on every push
   workflow_dispatch:  # Allow manual trigger
     inputs:
       update_type:
