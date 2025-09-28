@@ -57,7 +57,7 @@ variable "ecr_repo_name" {
 # Test variables for zero-downtime infrastructure updates
 variable "test_environment" {
   type        = string
-  default     = "production"
+  default     = "staging"  # Changed from production to staging
   description = "Environment label for testing infrastructure changes"
 }
 
