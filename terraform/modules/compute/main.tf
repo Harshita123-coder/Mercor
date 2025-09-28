@@ -61,7 +61,14 @@ resource "aws_iam_instance_profile" "ecs" {
 }
 
 # User data to join cluster
-locals { userdata = base64encode("echo 'ECS_CLUSTER=${var.cluster_name}' >> /etc/ecs/ecs.config") }
+locals { 
+  userdata = base64encode(<<-EOF
+    #!/bin/bash
+    echo 'ECS_CLUSTER=${var.cluster_name}' >> /etc/ecs/ecs.config
+    sudo systemctl restart ecs
+    EOF
+  )
+}
 
 resource "aws_launch_template" "lt" {
   name_prefix   = "${var.name_prefix}-lt-"
