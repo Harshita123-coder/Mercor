@@ -2,21 +2,46 @@
 resource "aws_security_group" "ecs_hosts" {
   name   = "${var.name_prefix}-ecs-hosts-sg"
   vpc_id = var.vpc_id
-  ingress { from_port=var.container_port to_port=var.container_port protocol="tcp" security_groups=[var.alb_sg_id] }
-  egress  { from_port=0 to_port=0 protocol="-1" cidr_blocks=["0.0.0.0/0"] }
+  
+  ingress {
+    from_port       = var.container_port
+    to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [var.alb_sg_id]
+  }
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 # ECS optimized AMI (fallback if var.ami_id is null)
 data "aws_ami" "ecs" {
   most_recent = true
   owners      = ["amazon"]
-  filter { name="name" values=["al2023-ami-ecs-hvm-*-x86_64"] }
+  
+  filter {
+    name   = "name"
+    values = ["al2023-ami-ecs-hvm-*-x86_64"]
+  }
 }
-locals { effective_ami = coalesce(var.ami_id, data.aws_ami.ecs.id) }
+
+locals { 
+  effective_ami = coalesce(var.ami_id, data.aws_ami.ecs.id) 
+}
 
 # Instance profile & role
 data "aws_iam_policy_document" "ec2_assume" {
-  statement { actions=["sts:AssumeRole"] principals { type="Service" identifiers=["ec2.amazonaws.com"] } }
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
 }
 resource "aws_iam_role" "ecs_instance" {
   name               = "${var.name_prefix}-ecs-instance-role"
@@ -42,12 +67,22 @@ resource "aws_launch_template" "lt" {
   name_prefix   = "${var.name_prefix}-lt-"
   image_id      = local.effective_ami
   instance_type = var.instance_type
-  iam_instance_profile { name = aws_iam_instance_profile.ecs.name }
+  
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ecs.name
+  }
+  
   user_data = local.userdata
-  network_interfaces { security_groups = [aws_security_group.ecs_hosts.id] }
+  
+  network_interfaces {
+    security_groups = [aws_security_group.ecs_hosts.id]
+  }
+  
   tag_specifications {
     resource_type = "instance"
-    tags = { Name = "${var.name_prefix}-ecs-host" }
+    tags = {
+      Name = "${var.name_prefix}-ecs-host"
+    }
   }
 }
 
@@ -59,7 +94,10 @@ resource "aws_autoscaling_group" "asg" {
   min_size            = 1
   health_check_type   = "EC2"
 
-  launch_template { id = aws_launch_template.lt.id version = "$Latest" }
+  launch_template {
+    id      = aws_launch_template.lt.id
+    version = "$Latest"
+  }
 
   # Zero-downtime infra upgrade
   instance_refresh {
@@ -72,8 +110,15 @@ resource "aws_autoscaling_group" "asg" {
     triggers = ["launch_template"]
   }
 
-  lifecycle { create_before_destroy = true }
-  tag { key="Name" value="${var.name_prefix}-ecs-host" propagate_at_launch=true }
+  lifecycle { 
+    create_before_destroy = true 
+  }
+  
+  tag {
+    key                 = "Name"
+    value               = "${var.name_prefix}-ecs-host"
+    propagate_at_launch = true
+  }
 }
 
 # Capacity provider & attach to cluster
@@ -92,5 +137,9 @@ resource "aws_ecs_capacity_provider" "cp" {
 resource "aws_ecs_cluster_capacity_providers" "attach" {
   cluster_name       = var.cluster_name
   capacity_providers = [aws_ecs_capacity_provider.cp.name]
-  default_capacity_provider_strategy { capacity_provider = aws_ecs_capacity_provider.cp.name weight = 1 }
+  
+  default_capacity_provider_strategy {
+    capacity_provider = aws_ecs_capacity_provider.cp.name
+    weight           = 1
+  }
 }

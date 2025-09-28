@@ -1,9 +1,16 @@
 terraform {
-  required_version = ">= 1.5.0"
-  required_providers { aws = { source="hashicorp/aws" version="~> 5.50" } }
+  required_version = ">= 1.0.0"
+  required_providers { 
+    aws = { 
+      source  = "hashicorp/aws"
+      version = "~> 5.50" 
+    } 
+  }
 }
 
-provider "aws" { region = var.region }
+provider "aws" { 
+  region = var.region 
+}
 
 module "network" {
   source              = "../../modules/network"
@@ -67,9 +74,26 @@ module "codedeploy" {
   tg_green_name   = module.traffic.tg_green_name
 }
 
-output "alb_dns"                 { value = module.traffic.alb_dns }
-output "codedeploy_app"          { value = module.codedeploy.application_name }
-output "codedeploy_deploy_group" { value = module.codedeploy.deployment_group_name }
-output "task_exec_role_arn"      { value = module.ecs_service.task_exec_role_arn }
-output "cluster_name"            { value = module.cluster.cluster_name }
-output "service_name"            { value = module.ecs_service.service_name }
+output "alb_dns" { 
+  value = module.traffic.alb_dns 
+}
+
+output "codedeploy_app" { 
+  value = module.codedeploy.application_name 
+}
+
+output "codedeploy_deploy_group" { 
+  value = module.codedeploy.deployment_group_name 
+}
+
+output "task_exec_role_arn" { 
+  value = module.ecs_service.task_exec_role_arn 
+}
+
+output "cluster_name" { 
+  value = module.cluster.cluster_name 
+}
+
+output "service_name" { 
+  value = module.ecs_service.service_name 
+}

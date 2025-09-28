@@ -1,6 +1,12 @@
 # Task execution role
 data "aws_iam_policy_document" "ecs_tasks_assume" {
-  statement { actions=["sts:AssumeRole"] principals { type="Service" identifiers=["ecs-tasks.amazonaws.com"] } }
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
 }
 resource "aws_iam_role" "task_exec" {
   name               = "${var.name_prefix}-task-exec"

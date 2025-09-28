@@ -1,25 +1,33 @@
-name: deploy
+name: Deploy to ECS
+
 on:
   push:
     branches: [ main ]
     paths-ignore:
       - "README.md"
 
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: mercor-ecs-demo
+
 jobs:
   deploy:
+    name: Deploy to ECS
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Configure AWS
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ secrets.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to ECR
-        id: login
+      - name: Login to Amazon ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Terraform init/plan/apply
@@ -41,25 +49,37 @@ jobs:
 
       - name: Register new task definition revision
         env:
-          REG:    ${{ steps.login.outputs.registry }}
-          REPO:   ${{ secrets.ECR_REPOSITORY }}
-          REGION: ${{ secrets.AWS_REGION }}
-          EXEC:   ${{ steps.tf.outputs.EXEC }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          EXEC_ROLE_ARN: ${{ steps.tf.outputs.EXEC }}
         run: |
-          IMG="$REG/$REPO:${{ github.sha }}"
-          jq --arg IMG "$IMG" --arg REGION "$REGION" --arg EXEC "$EXEC" \
+          # Create updated task definition
+          IMG="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          jq --arg IMG "$IMG" --arg REGION "$AWS_REGION" --arg EXEC "$EXEC_ROLE_ARN" \
             '.executionRoleArn=$EXEC | .containerDefinitions[0].image=$IMG | .containerDefinitions[0].logConfiguration.options["awslogs-region"]=$REGION' \
             codedeploy/taskdef.template.json > td.json
+          
+          # Register the new task definition
           TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://td.json --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "TASK_ARN=$TASK_ARN" >> $GITHUB_ENV
 
       - name: Create CodeDeploy deployment (blue/green)
         env:
-          APP:   ${{ steps.tf.outputs.APP }}
-          DG:    ${{ steps.tf.outputs.DG }}
+          CODEDEPLOY_APP: ${{ steps.tf.outputs.APP }}
+          DEPLOYMENT_GROUP: ${{ steps.tf.outputs.DG }}
         run: |
+          # Update appspec with new task definition ARN
           sed "s|<TASK_DEF_ARN>|$TASK_ARN|g" codedeploy/appspec.yaml > appspec.out.yaml
+          
+          # Create CodeDeploy deployment
           aws codedeploy create-deployment \
-            --application-name "$APP" \
-            --deployment-group-name "$DG" \
+            --application-name "$CODEDEPLOY_APP" \
+            --deployment-group-name "$DEPLOYMENT_GROUP" \
             --revision revisionType=AppSpecContent,appSpecContent="{\"content\":\"$(base64 -w0 appspec.out.yaml)\"}"
+
+      - name: Verify deployment
+        run: |
+          echo "Deployment initiated successfully!"
+          echo "ALB DNS: ${{ steps.tf.outputs.ALB }}"
+          echo "CodeDeploy App: ${{ steps.tf.outputs.APP }}"
+          echo "Deployment Group: ${{ steps.tf.outputs.DG }}"
