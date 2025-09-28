@@ -1,0 +1,10 @@
+region           = "us-east-1"
+name_prefix      = "mercor-demo"
+vpc_cidr         = "10.20.0.0/16"
+public_subnets   = ["10.20.1.0/24","10.20.2.0/24"]
+container_port   = 8080
+health_path      = "/"
+instance_type    = "t3.small"
+desired_capacity = 2
+max_capacity     = 4
+ecr_repo_name    = "mercor-ecs-demo"

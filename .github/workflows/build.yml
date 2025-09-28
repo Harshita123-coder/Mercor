@@ -1,0 +1,33 @@
+name: build
+on:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to ECR
+        id: login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push
+        env:
+          REG: ${{ steps.login.outputs.registry }}
+          REPO: ${{ secrets.ECR_REPOSITORY }}
+          TAG:  ${{ github.sha }}
+        run: |
+          docker build -t $REG/$REPO:$TAG app
+          docker push $REG/$REPO:$TAG
+          echo "IMAGE=$REG/$REPO:$TAG" >> $GITHUB_ENV

@@ -1,0 +1,65 @@
+name: deploy
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - "README.md"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to ECR
+        id: login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Terraform init/plan/apply
+        working-directory: terraform/envs/dev
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -input=false
+
+      - name: Grab TF outputs
+        id: tf
+        working-directory: terraform/envs/dev
+        run: |
+          echo "ALB=$(terraform output -raw alb_dns)" >> $GITHUB_OUTPUT
+          echo "APP=$(terraform output -raw codedeploy_app)" >> $GITHUB_OUTPUT
+          echo "DG=$(terraform output -raw codedeploy_deploy_group)" >> $GITHUB_OUTPUT
+          echo "EXEC=$(terraform output -raw task_exec_role_arn)" >> $GITHUB_OUTPUT
+          echo "CLUSTER=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+          echo "SVC=$(terraform output -raw service_name)" >> $GITHUB_OUTPUT
+
+      - name: Register new task definition revision
+        env:
+          REG:    ${{ steps.login.outputs.registry }}
+          REPO:   ${{ secrets.ECR_REPOSITORY }}
+          REGION: ${{ secrets.AWS_REGION }}
+          EXEC:   ${{ steps.tf.outputs.EXEC }}
+        run: |
+          IMG="$REG/$REPO:${{ github.sha }}"
+          jq --arg IMG "$IMG" --arg REGION "$REGION" --arg EXEC "$EXEC" \
+            '.executionRoleArn=$EXEC | .containerDefinitions[0].image=$IMG | .containerDefinitions[0].logConfiguration.options["awslogs-region"]=$REGION' \
+            codedeploy/taskdef.template.json > td.json
+          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://td.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "TASK_ARN=$TASK_ARN" >> $GITHUB_ENV
+
+      - name: Create CodeDeploy deployment (blue/green)
+        env:
+          APP:   ${{ steps.tf.outputs.APP }}
+          DG:    ${{ steps.tf.outputs.DG }}
+        run: |
+          sed "s|<TASK_DEF_ARN>|$TASK_ARN|g" codedeploy/appspec.yaml > appspec.out.yaml
+          aws codedeploy create-deployment \
+            --application-name "$APP" \
+            --deployment-group-name "$DG" \
+            --revision revisionType=AppSpecContent,appSpecContent="{\"content\":\"$(base64 -w0 appspec.out.yaml)\"}"
