@@ -1,34 +1,37 @@
-name: Infrastructure Update - Zero Downtime (Fixed)
+name: Infrastructure Update - Zero Downtime
 
 on:
   push:
     branches: [ main ]
-    # Removed paths filter - now runs on every push
+    paths:
+      - "terraform/**"
   workflow_dispatch:  # Allow manual trigger
     inputs:
       update_type:
         description: 'Type of infrastructure update'
         required: true
-        default: 'fargate_service'
+        default: 'variable_changes'
         type: choice
         options:
-          - fargate_service
-          - load_balancer
-          - networking
-          - security_groups
+          - variable_changes
+          - scaling_test
+          - service_update
+          - health_check_test
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: mercor-ecs-demo
 
 jobs:
-  infrastructure-update:
+  zero-downtime-infrastructure-update:
     name: Zero-Downtime Infrastructure Update
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Fetch current and previous commit to see changes
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -42,74 +45,145 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Record pre-update state
+      - name: Detect and display variable changes
+        id: variable-changes
+        run: |
+          echo "🔍 Detecting Terraform variable changes..."
+          
+          if git diff HEAD~1 HEAD --name-only | grep -q "terraform/"; then
+            echo "📋 Terraform files changed in this commit:"
+            git diff HEAD~1 HEAD --name-only | grep "terraform/" || echo "No terraform files"
+            
+            echo ""
+            echo "🔧 Variable changes detected:"
+            git diff HEAD~1 HEAD terraform/envs/dev/variables.tf || echo "No variable changes"
+            
+            # Extract current variable values
+            echo ""
+            echo "📊 Current variable values:"
+            cd terraform/envs/dev
+            grep -A2 "variable.*desired_capacity" variables.tf | grep default | awk '{print "desired_capacity: " $3}'
+            grep -A2 "variable.*max_capacity" variables.tf | grep default | awk '{print "max_capacity: " $3}'
+            grep -A2 "variable.*test_environment" variables.tf | grep default | awk -F'"' '{print "test_environment: " $2}'
+            
+            echo "CHANGES_DETECTED=true" >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ No terraform changes detected"
+            echo "CHANGES_DETECTED=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Record pre-update application state
         id: pre-state
         run: |
-          echo "🐛 DEBUG: Starting pre-update state check"
+          echo "🔍 Recording pre-update state"
           
-          # Check current application availability
+          # Check application availability
           ALB_DNS="mercor-demo-alb-614078766.us-east-1.elb.amazonaws.com"
-          echo "🔍 Pre-update health check:"
+          echo "🌐 Pre-update application check:"
           if curl -f "http://$ALB_DNS"; then
-            echo "✅ Application accessible"
+            echo "✅ Application accessible before changes"
+            echo "APP_ACCESSIBLE=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ Application not accessible"
+            echo "❌ Application not accessible - cannot proceed with test"
+            echo "APP_ACCESSIBLE=false" >> $GITHUB_OUTPUT
             exit 1
           fi
           
-          # Record current ECS service state (we're using Fargate, not ASG)
+          # Record ECS service state
           echo "📊 Current ECS Service State:"
           aws ecs describe-services \
             --cluster mercor-demo-cluster \
             --services mercor-demo-fargate-svc \
-            --query 'services[0].[serviceName,status,runningCount,pendingCount,desiredCount,platformVersion]' \
+            --query 'services[0].[serviceName,status,runningCount,pendingCount,desiredCount]' \
             --output table
           
           echo "START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
-          echo "🐛 DEBUG: Pre-update state check completed"
 
-      - name: Apply infrastructure updates
+      - name: Start continuous monitoring
+        id: start-monitoring
+        run: |
+          echo "🔄 Starting continuous application monitoring..."
+          
+          # Create monitoring script
+          cat > /tmp/monitor_app.sh << 'EOF'
+          #!/bin/bash
+          ALB_DNS="mercor-demo-alb-614078766.us-east-1.elb.amazonaws.com"
+          log_file="/tmp/monitoring.log"
+          
+          echo "$(date): 🎯 Starting continuous zero-downtime monitoring" > $log_file
+          
+          total_checks=0
+          successful_checks=0
+          failed_checks=0
+          
+          while [ ! -f "/tmp/stop_monitoring" ]; do
+            total_checks=$((total_checks + 1))
+            
+            if curl -f -s --max-time 10 "http://$ALB_DNS" > /dev/null 2>&1; then
+              successful_checks=$((successful_checks + 1))
+              echo "$(date): ✅ Check $total_checks - App accessible (Success: $successful_checks, Failed: $failed_checks)" >> $log_file
+            else
+              failed_checks=$((failed_checks + 1))
+              echo "$(date): ❌ Check $total_checks - App NOT accessible (Success: $successful_checks, Failed: $failed_checks)" >> $log_file
+            fi
+            
+            sleep 15
+          done
+          
+          echo "$(date): 🛑 Monitoring stopped. Final stats - Total: $total_checks, Success: $successful_checks, Failed: $failed_checks" >> $log_file
+          EOF
+          
+          chmod +x /tmp/monitor_app.sh
+          # Start monitoring in background
+          /tmp/monitor_app.sh &
+          MONITOR_PID=$!
+          echo "MONITOR_PID=$MONITOR_PID" >> $GITHUB_OUTPUT
+          echo "🟢 Continuous monitoring started with PID: $MONITOR_PID"
+
+      - name: Apply terraform changes
         id: terraform-apply
+        if: steps.variable-changes.outputs.CHANGES_DETECTED == 'true'
         working-directory: terraform/envs/dev
         run: |
+          echo "🚀 Applying Terraform changes with zero-downtime monitoring..."
+          
           terraform init -input=false
           
-          echo "� Checking current Terraform state..."
-          terraform refresh -input=false || echo "⚠️ Refresh had issues, continuing..."
+          echo "📋 Planning infrastructure changes..."
+          terraform plan -out=tfplan -detailed-exitcode
+          plan_exit_code=$?
           
-          echo "�🚀 Planning infrastructure changes..."
-          if terraform plan -out=tfplan -detailed-exitcode; then
-            plan_exit_code=$?
-            if [ $plan_exit_code -eq 2 ]; then
-              echo "📋 Changes detected, applying..."
-              if terraform apply -auto-approve tfplan; then
-                echo "✅ Terraform apply completed successfully"
-                echo "TERRAFORM_SUCCESS=true" >> $GITHUB_OUTPUT
-              else
-                echo "❌ Terraform apply failed"
-                echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
-                exit 1
-              fi
-            else
-              echo "ℹ️ No changes detected, infrastructure is up to date"
+          if [ $plan_exit_code -eq 2 ]; then
+            echo "✅ Changes detected in plan, applying..."
+            echo "📊 Terraform plan shows these changes will be applied:"
+            terraform show tfplan
+            
+            echo ""
+            echo "🔄 Applying changes while monitoring continues..."
+            if terraform apply -auto-approve tfplan; then
+              echo "✅ Terraform apply completed successfully"
               echo "TERRAFORM_SUCCESS=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Terraform apply failed"
+              echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
+              exit 1
             fi
+          elif [ $plan_exit_code -eq 0 ]; then
+            echo "ℹ️ No infrastructure changes needed (plan shows no changes)"
+            echo "TERRAFORM_SUCCESS=no_changes" >> $GITHUB_OUTPUT
           else
             echo "❌ Terraform plan failed"
             echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-      - name: Monitor service update
+      - name: Wait for infrastructure stabilization
+        if: steps.terraform-apply.outputs.TERRAFORM_SUCCESS == 'true'
         run: |
-          echo "🔄 Monitoring ECS Fargate service update..."
+          echo "⏳ Waiting for infrastructure to stabilize after changes..."
           
-          ALB_DNS="mercor-demo-alb-614078766.us-east-1.elb.amazonaws.com"
-          max_wait=600  # 10 minutes for Fargate deployments
+          max_wait=600  # 10 minutes
           wait_time=0
-          consecutive_successes=0
-          
-          echo "🎯 Monitoring application availability during infrastructure update..."
           
           while [ $wait_time -lt $max_wait ]; do
             # Check ECS service status
@@ -117,92 +191,156 @@ jobs:
               --cluster mercor-demo-cluster \
               --services mercor-demo-fargate-svc \
               --query 'services[0].[runningCount,pendingCount,desiredCount]' \
-              --output text)
+              --output text 2>/dev/null)
             
-            running_count=$(echo $service_status | cut -d' ' -f1)
-            pending_count=$(echo $service_status | cut -d' ' -f2)
-            desired_count=$(echo $service_status | cut -d' ' -f3)
-            
-            # Check application availability
-            if curl -f -s "http://$ALB_DNS" > /dev/null; then
-              consecutive_successes=$((consecutive_successes + 1))
-              echo "✅ Time: ${wait_time}s | Running: $running_count/$desired_count | Pending: $pending_count | App: Accessible (${consecutive_successes} consecutive)"
+            if [ $? -eq 0 ]; then
+              running_count=$(echo $service_status | cut -d' ' -f1)
+              pending_count=$(echo $service_status | cut -d' ' -f2)
+              desired_count=$(echo $service_status | cut -d' ' -f3)
+              
+              echo "⏰ Time: ${wait_time}s | ECS: Running: $running_count/$desired_count, Pending: $pending_count"
+              
+              # Check if service is stable
+              if [ "$running_count" = "$desired_count" ] && [ "$pending_count" = "0" ]; then
+                echo "✅ ECS service is stable!"
+                break
+              fi
             else
-              consecutive_successes=0
-              echo "❌ Time: ${wait_time}s | Running: $running_count/$desired_count | Pending: $pending_count | App: Not accessible"
+              echo "⚠️ Could not check ECS service status"
             fi
             
-            # If we have stable service and app is accessible for 3 consecutive checks, we're done
-            if [ "$running_count" = "$desired_count" ] && [ "$pending_count" = "0" ] && [ $consecutive_successes -ge 3 ]; then
-              echo "🎉 Service is stable and application is consistently accessible!"
-              break
-            fi
-            
-            sleep 20
-            wait_time=$((wait_time + 20))
+            sleep 30
+            wait_time=$((wait_time + 30))
           done
+
+      - name: Stop monitoring and analyze results
+        if: always()
+        id: analyze-results
+        run: |
+          echo "🛑 Stopping monitoring and analyzing zero-downtime results..."
           
-          if [ $wait_time -ge $max_wait ]; then
-            echo "⚠️  Monitoring timeout reached, but continuing with verification..."
+          # Stop monitoring process
+          MONITOR_PID="${{ steps.start-monitoring.outputs.MONITOR_PID }}"
+          if [ ! -z "$MONITOR_PID" ] && kill -0 $MONITOR_PID 2>/dev/null; then
+            touch /tmp/stop_monitoring
+            sleep 5
+            kill $MONITOR_PID 2>/dev/null || echo "Monitor process stopped gracefully"
+          fi
+          
+          # Analyze monitoring results
+          if [ -f "/tmp/monitoring.log" ]; then
+            echo ""
+            echo "📊 ZERO-DOWNTIME ANALYSIS RESULTS:"
+            echo "=================================="
+            cat /tmp/monitoring.log
+            echo "=================================="
+            echo ""
+            
+            total_checks=$(grep -c "Check.*- App" /tmp/monitoring.log 2>/dev/null || echo "0")
+            success_count=$(grep -c "✅.*App accessible" /tmp/monitoring.log 2>/dev/null || echo "0")
+            failed_count=$(grep -c "❌.*App NOT accessible" /tmp/monitoring.log 2>/dev/null || echo "0")
+            
+            echo "📈 FINAL STATISTICS:"
+            echo "Total Availability Checks: $total_checks"
+            echo "Successful Checks: $success_count"
+            echo "Failed Checks: $failed_count"
+            
+            if [ "$failed_count" -eq 0 ] && [ "$total_checks" -gt 0 ]; then
+              echo "🎉 ZERO DOWNTIME ACHIEVED! No failed checks detected during infrastructure update."
+              echo "ZERO_DOWNTIME=true" >> $GITHUB_OUTPUT
+            elif [ "$total_checks" -eq 0 ]; then
+              echo "⚠️ No monitoring data available"
+              echo "ZERO_DOWNTIME=unknown" >> $GITHUB_OUTPUT
+            else
+              if [ "$total_checks" -gt 0 ]; then
+                failure_percentage=$((failed_count * 100 / total_checks))
+                echo "⚠️ DOWNTIME DETECTED: $failed_count failures out of $total_checks checks (${failure_percentage}%)"
+              else
+                echo "⚠️ DOWNTIME DETECTED: $failed_count failures"
+              fi
+              echo "ZERO_DOWNTIME=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Monitoring log not found"
+            echo "ZERO_DOWNTIME=unknown" >> $GITHUB_OUTPUT
           fi
 
-      - name: Verify zero-downtime update
-        if: steps.terraform-apply.outputs.TERRAFORM_SUCCESS == 'true'
+      - name: Final verification
         run: |
-          echo "🔍 Post-update verification:"
+          echo "🔍 Final post-update verification:"
           
-          # Final health check
+          # Final application check
           ALB_DNS="mercor-demo-alb-614078766.us-east-1.elb.amazonaws.com"
+          echo "🌐 Final application accessibility test:"
           if curl -f "http://$ALB_DNS"; then
-            echo "✅ Application is accessible after update"
+            echo "✅ Application is accessible after infrastructure update"
           else
-            echo "❌ Application failed post-update check"
+            echo "❌ Application not accessible after update - this indicates a problem"
             exit 1
           fi
           
-          # Show final ECS service state
-          echo "📊 Final ECS Service State:"
+          # Show final infrastructure state
+          echo ""
+          echo "📊 Final Infrastructure State:"
           aws ecs describe-services \
             --cluster mercor-demo-cluster \
             --services mercor-demo-fargate-svc \
-            --query 'services[0].[serviceName,status,runningCount,pendingCount,desiredCount,platformVersion,taskDefinition]' \
+            --query 'services[0].[serviceName,status,runningCount,pendingCount,desiredCount,platformVersion]' \
             --output table
-          
-          echo "🎉 Zero-downtime infrastructure update completed successfully!"
 
-      - name: Handle terraform failure
-        if: steps.terraform-apply.outputs.TERRAFORM_SUCCESS == 'false'
-        run: |
-          echo "❌ Infrastructure update failed due to Terraform errors"
-          echo "🔍 Common issues:"
-          echo "  - Resources already exist (need to import to state)"
-          echo "  - AWS service subscription required (CodeDeploy)"
-          echo "  - Resource conflicts or permission issues"
-          echo ""
-          echo "💡 Recommendations:"
-          echo "  1. Import existing resources to Terraform state"
-          echo "  2. Enable required AWS services"
-          echo "  3. Use terraform plan to check changes before apply"
-          exit 1
-
-      - name: Summary report
+      - name: Zero-Downtime Test Summary
         if: always()
         run: |
-          echo "📊 Infrastructure Update Summary:"
+          echo ""
+          echo "🏆 ZERO-DOWNTIME INFRASTRUCTURE UPDATE SUMMARY"
+          echo "=============================================="
           echo "⏱️  Start Time: ${{ steps.pre-state.outputs.START_TIME }}"
           echo "⏱️  End Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "🎯 Update Type: ${{ github.event.inputs.update_type || 'fargate_service' }}"
-          echo "🏗️  Infrastructure: Terraform execution"
+          echo "🔧 Changes Detected: ${{ steps.variable-changes.outputs.CHANGES_DETECTED }}"
+          echo "🎯 Update Type: ${{ github.event.inputs.update_type || 'terraform_variable_changes' }}"
           
-          # Check if terraform was successful
-          terraform_success="${{ steps.terraform-apply.outputs.TERRAFORM_SUCCESS }}"
-          if [ "$terraform_success" = "true" ]; then
-            echo "⚡ Downtime: Zero (verified via continuous monitoring)"
-            echo "🚀 Platform: AWS Fargate (Serverless Containers)"
-            echo "✅ Status: Success"
+          # Show terraform status
+          terraform_status="${{ steps.terraform-apply.outputs.TERRAFORM_SUCCESS }}"
+          if [ "$terraform_status" = "true" ]; then
+            echo "🏗️  Terraform Status: ✅ SUCCESS - Infrastructure changes applied"
+          elif [ "$terraform_status" = "no_changes" ]; then
+            echo "🏗️  Terraform Status: ℹ️ NO CHANGES - Infrastructure already up to date"
+          elif [ "$terraform_status" = "false" ]; then
+            echo "🏗️  Terraform Status: ❌ FAILED - Infrastructure changes failed"
           else
-            echo "❌ Terraform Status: Failed"
-            echo "⚠️  Infrastructure: May have resource conflicts"
-            echo "🔧 Action Required: Check terraform state and import existing resources"
-            echo "❌ Status: Failed"
+            echo "🏗️  Terraform Status: ⚠️ SKIPPED - No terraform changes to apply"
+          fi
+          
+          # Show zero downtime result
+          zero_downtime="${{ steps.analyze-results.outputs.ZERO_DOWNTIME }}"
+          case "$zero_downtime" in
+            "true")
+              echo "⚡ ZERO DOWNTIME: ✅ SUCCESS - No application downtime detected!"
+              echo "🎉 RESULT: PASSED - Infrastructure updated without service interruption"
+              ;;
+            "false")
+              echo "⚡ ZERO DOWNTIME: ❌ FAILED - Application downtime detected"
+              echo "🚨 RESULT: FAILED - Service interruption occurred during update"
+              ;;
+            *)
+              echo "⚡ ZERO DOWNTIME: ❓ UNKNOWN - Unable to determine (monitoring issues)"
+              echo "⚠️  RESULT: INCONCLUSIVE - Manual verification required"
+              ;;
+          esac
+          
+          echo "🚀 Platform: AWS ECS Fargate (Serverless Containers)"
+          echo "🔄 Monitoring: Continuous availability verification"
+          echo "=============================================="
+          
+          # Set final status
+          if [ "$terraform_status" = "true" ] || [ "$terraform_status" = "no_changes" ]; then
+            if [ "$zero_downtime" = "true" ]; then
+              echo "🏆 OVERALL STATUS: SUCCESS - Zero-downtime infrastructure update achieved!"
+            elif [ "$zero_downtime" = "unknown" ]; then
+              echo "✅ OVERALL STATUS: SUCCESS - Infrastructure updated (monitoring inconclusive)"
+            else
+              echo "⚠️ OVERALL STATUS: PARTIAL SUCCESS - Infrastructure updated but downtime detected"
+            fi
+          else
+            echo "❌ OVERALL STATUS: FAILED - Infrastructure update issues require attention"
           fi
