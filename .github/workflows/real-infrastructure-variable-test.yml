@@ -268,12 +268,16 @@ jobs:
             echo "Successful: $success_count"
             echo "Failed: $failure_count"
             
-            if [ $failure_count -eq 0 ]; then
+            if [ "$failure_count" -eq 0 ]; then
               echo "🎉 ZERO DOWNTIME ACHIEVED! No failed checks detected."
               echo "ZERO_DOWNTIME=true" >> $GITHUB_OUTPUT
             else
-              failure_percentage=$((failure_count * 100 / total_checks))
-              echo "⚠️ DOWNTIME DETECTED: $failure_count failures out of $total_checks checks ($failure_percentage%)"
+              if [ "$total_checks" -gt 0 ]; then
+                failure_percentage=$((failure_count * 100 / total_checks))
+                echo "⚠️ DOWNTIME DETECTED: $failure_count failures out of $total_checks checks ($failure_percentage%)"
+              else
+                echo "⚠️ DOWNTIME DETECTED: $failure_count failures detected"
+              fi
               echo "ZERO_DOWNTIME=false" >> $GITHUB_OUTPUT
             fi
           else

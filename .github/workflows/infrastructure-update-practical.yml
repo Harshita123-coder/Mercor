@@ -1,7 +1,11 @@
 name: Infrastructure Update - Zero Downtime (Practical)
 
 on:
-  workflow_dispatch:  # Manual trigger only for safety
+  push:
+    branches: [ main ]
+    paths:
+      - "terraform/**"
+  workflow_dispatch:  # Allow manual trigger
     inputs:
       update_type:
         description: 'Type of infrastructure update'
