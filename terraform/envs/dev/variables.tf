@@ -36,7 +36,7 @@ variable "instance_type" {
 
 variable "desired_capacity" {
   type    = number
-  default = 4  # DEMO: Scale up to 4 instances for high availability demonstration
+  default = 2  # VERIFICATION: Scale down to 2 instances to test zero-downtime scaling
 }
 
 variable "max_capacity" {
@@ -64,7 +64,7 @@ variable "ecr_repo_name" {
 # Test variables for zero-downtime infrastructure updates
 variable "test_environment" {
   type        = string
-  default     = "demo_production"  # DEMO: Set to demo_production for interviewer
+  default     = "verification_test"  # VERIFICATION: Final test environment
   description = "Environment label for testing infrastructure changes"
 }
 
