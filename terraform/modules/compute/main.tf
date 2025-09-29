@@ -18,11 +18,11 @@ resource "aws_security_group" "ecs_hosts" {
   }
 }
 
-# ECS optimized AMI (fallback if var.ami_id is null)
+# ECS optimized AL2023 AMI
 data "aws_ami" "ecs" {
   most_recent = true
   owners      = ["amazon"]
-  
+
   filter {
     name   = "name"
     values = ["al2023-ami-ecs-hvm-*-x86_64"]
@@ -43,18 +43,22 @@ data "aws_iam_policy_document" "ec2_assume" {
     }
   }
 }
+
 resource "aws_iam_role" "ecs_instance" {
   name               = "${var.name_prefix}-ecs-instance-role"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
 }
+
 resource "aws_iam_role_policy_attachment" "ecs_for_ec2" {
   role       = aws_iam_role.ecs_instance.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
+
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.ecs_instance.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
+
 resource "aws_iam_instance_profile" "ecs" {
   name = "${var.name_prefix}-ecs-instance-profile"
   role = aws_iam_role.ecs_instance.name
@@ -64,26 +68,27 @@ resource "aws_iam_instance_profile" "ecs" {
 locals { 
   userdata = base64encode(<<-EOF
     #!/bin/bash
-    # Set ECS cluster name
-    echo 'ECS_CLUSTER=${var.cluster_name}' >> /etc/ecs/ecs.config
+    # Update system
+    yum update -y
+
+    # Ensure ecs.config directory exists
+    mkdir -p /etc/ecs
+
+    # Set ECS cluster name and enable task IAM roles
+    echo 'ECS_CLUSTER=${var.cluster_name}' > /etc/ecs/ecs.config
     echo 'ECS_ENABLE_CONTAINER_METADATA=true' >> /etc/ecs/ecs.config
-    
-    # Enable and start the ECS service
-    systemctl enable ecs
-    systemctl start ecs
-    
-    # Wait for ECS agent to be ready
-    sleep 60
-    
-    # Restart ECS to ensure proper cluster connection
-    systemctl restart ecs
-    
-    # Log the status for troubleshooting
-    echo "ECS Agent Status:" > /var/log/ecs-startup.log
+    echo 'ECS_ENABLE_LOGGING=true' >> /etc/ecs/ecs.config
+    echo 'ECS_ENABLE_TASK_IAM_ROLE=true' >> /etc/ecs/ecs.config
+    echo 'ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true' >> /etc/ecs/ecs.config
+
+    # Enable and start ECS service (already on AL2023 ECS AMI)
+    systemctl enable --now ecs
+
+    # Log ECS service status for debugging
+    echo "=== ECS Startup Log $(date) ===" > /var/log/ecs-startup.log
     systemctl status ecs >> /var/log/ecs-startup.log 2>&1
-    echo "ECS Config:" >> /var/log/ecs-startup.log
     cat /etc/ecs/ecs.config >> /var/log/ecs-startup.log
-    EOF
+  EOF
   )
 }
 
@@ -131,7 +136,6 @@ resource "aws_autoscaling_group" "asg" {
       instance_warmup        = 60
       skip_matching          = true
     }
-    # triggers removed - launch_template changes automatically trigger refresh
   }
 
   lifecycle { 
@@ -149,7 +153,7 @@ resource "aws_autoscaling_group" "asg" {
 resource "aws_ecs_capacity_provider" "cp" {
   name = "${var.name_prefix}-cp"
   auto_scaling_group_provider {
-    auto_scaling_group_arn = aws_autoscaling_group.asg.arn
+    auto_scaling_group_arn     = aws_autoscaling_group.asg.arn
     managed_termination_protection = "DISABLED"
     managed_scaling {
       status          = "ENABLED"
@@ -164,6 +168,6 @@ resource "aws_ecs_cluster_capacity_providers" "attach" {
   
   default_capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.cp.name
-    weight           = 1
+    weight            = 1
   }
 }
