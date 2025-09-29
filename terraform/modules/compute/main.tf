@@ -70,24 +70,56 @@ locals {
     #!/bin/bash
     # Update system
     yum update -y
-
+    
+    # Install ECS agent if not present
+    yum install -y ecs-init
+    
     # Ensure ecs.config directory exists
     mkdir -p /etc/ecs
-
+    
     # Set ECS cluster name and enable task IAM roles
-    echo 'ECS_CLUSTER=${var.cluster_name}' > /etc/ecs/ecs.config
-    echo 'ECS_ENABLE_CONTAINER_METADATA=true' >> /etc/ecs/ecs.config
-    echo 'ECS_ENABLE_LOGGING=true' >> /etc/ecs/ecs.config
-    echo 'ECS_ENABLE_TASK_IAM_ROLE=true' >> /etc/ecs/ecs.config
-    echo 'ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true' >> /etc/ecs/ecs.config
-
-    # Enable and start ECS service (already on AL2023 ECS AMI)
-    systemctl enable --now ecs
-
-    # Log ECS service status for debugging
+    cat > /etc/ecs/ecs.config << EOL
+ECS_CLUSTER=${var.cluster_name}
+ECS_ENABLE_CONTAINER_METADATA=true
+ECS_ENABLE_LOGGING=true
+ECS_ENABLE_TASK_IAM_ROLE=true
+ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true
+ECS_BACKEND_HOST=
+ECS_ENABLE_SPOT_INSTANCE_DRAINING=false
+ECS_DISABLE_IMAGE_CLEANUP=false
+ECS_IMAGE_CLEANUP_INTERVAL=30m
+ECS_IMAGE_MINIMUM_CLEANUP_AGE=1h
+EOL
+    
+    # Start and enable ECS service - try multiple service names
+    if systemctl list-unit-files | grep -q ecs.service; then
+        systemctl enable ecs
+        systemctl start ecs
+        echo "Started ecs.service" >> /var/log/ecs-startup.log
+    elif systemctl list-unit-files | grep -q ecs-init.service; then
+        systemctl enable ecs-init
+        systemctl start ecs-init
+        echo "Started ecs-init.service" >> /var/log/ecs-startup.log
+    else
+        # Try starting ECS agent directly
+        /usr/bin/ecs-init start
+        echo "Started ECS agent directly" >> /var/log/ecs-startup.log
+    fi
+    
+    # Wait a moment for service to start
+    sleep 10
+    
+    # Log everything for debugging
     echo "=== ECS Startup Log $(date) ===" > /var/log/ecs-startup.log
-    systemctl status ecs >> /var/log/ecs-startup.log 2>&1
+    echo "== ECS Config ==" >> /var/log/ecs-startup.log
     cat /etc/ecs/ecs.config >> /var/log/ecs-startup.log
+    echo "== Service Status ==" >> /var/log/ecs-startup.log
+    systemctl status ecs >> /var/log/ecs-startup.log 2>&1 || echo "ecs.service not found" >> /var/log/ecs-startup.log
+    systemctl status ecs-init >> /var/log/ecs-startup.log 2>&1 || echo "ecs-init.service not found" >> /var/log/ecs-startup.log
+    echo "== Docker Status ==" >> /var/log/ecs-startup.log
+    systemctl status docker >> /var/log/ecs-startup.log 2>&1
+    echo "== Network Test ==" >> /var/log/ecs-startup.log
+    curl -I https://ecs.us-east-1.amazonaws.com >> /var/log/ecs-startup.log 2>&1
   EOF
   )
 }
