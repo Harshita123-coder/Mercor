@@ -1,4 +1,4 @@
-name: Deploy to ECS
+name: Deploy to ECS on EC2
 
 on:
   push:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   deploy:
-    name: Deploy to ECS
+    name: Deploy to ECS on EC2
     runs-on: ubuntu-latest
 
     steps:
@@ -59,14 +59,14 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           EXEC_ROLE_ARN: ${{ steps.infra.outputs.EXEC }}
         run: |
-          # Create Fargate-compatible task definition
+          # Create EC2-compatible task definition
           IMG="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           
-          cat > fargate-taskdef.json << EOF
+          cat > ec2-taskdef.json << EOF
           {
-            "family": "mercor-demo-fargate-task",
-            "networkMode": "awsvpc",
-            "requiresCompatibilities": ["FARGATE"],
+            "family": "mercor-demo-task",
+            "networkMode": "bridge",
+            "requiresCompatibilities": ["EC2"],
             "cpu": "256",
             "memory": "512",
             "executionRoleArn": "$EXEC_ROLE_ARN",
@@ -75,8 +75,8 @@ jobs:
                 "name": "app",
                 "image": "$IMG",
                 "essential": true,
-                "portMappings": [{"containerPort": 8080, "protocol": "tcp"}],
-                "environment": [{"name": "APP_MSG", "value": "Hello from v2 (green) - Blue/Green deployment test!"}],
+                "portMappings": [{"containerPort": 8080, "hostPort": 0}],
+                "environment": [{"name": "APP_MSG", "value": "Hello from EC2 Blue/Green deployment!"}],
                 "logConfiguration": {
                   "logDriver": "awslogs",
                   "options": {
@@ -91,28 +91,27 @@ jobs:
           EOF
           
           # Register the new task definition
-          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://fargate-taskdef.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          TASK_ARN=$(aws ecs register-task-definition --cli-input-json file://ec2-taskdef.json --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "TASK_ARN=$TASK_ARN" >> $GITHUB_ENV
-          echo "New Fargate task definition: $TASK_ARN"
+          echo "New EC2 task definition: $TASK_ARN"
 
-      - name: Test with Fargate task (bypass CodeDeploy issues)
+      - name: Update ECS service with new task definition
         env:
           CLUSTER: ${{ steps.infra.outputs.CLUSTER }}
         run: |
-          # Run a test task to validate the new image
-          echo "Running test task with new image..."
-          aws ecs run-task \
+          # Update ECS service to use new task definition
+          echo "Updating ECS service on EC2 with new task definition..."
+          aws ecs update-service \
             --cluster "$CLUSTER" \
+            --service "mercor-demo-svc" \
             --task-definition "$TASK_ARN" \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-0f116f7277143cd2c,subnet-0fae0cb054ff7a47b],securityGroups=[sg-04c3e0fb340b72452],assignPublicIp=ENABLED}" \
-            --query 'tasks[0].taskArn' \
+            --query 'service.taskDefinition' \
             --output text
 
       - name: Display deployment info
         run: |
-          echo "✅ Deployment Summary:"
+          echo "✅ EC2 Deployment Summary:"
           echo "🌐 Load Balancer: ${{ steps.infra.outputs.ALB }}"
           echo "🐳 New Task Definition: $TASK_ARN"
-          echo "🏗️  Infrastructure: Ready"
-          echo "🎯 Application: Deployed and tested"
+          echo "🏗️  Infrastructure: EC2-based ECS"
+          echo "🎯 Application: Deployed with dynamic port mapping"

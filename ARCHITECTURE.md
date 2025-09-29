@@ -1,23 +1,23 @@
-# ECS Fargate Zero-Downtime Infrastructure Updates
+# ECS on EC2 Zero-Downtime Infrastructure Updates
 
 ## Overview
 
-This project implements a **production-grade, zero-downtime infrastructure update system** on AWS ECS Fargate using Infrastructure as Code (Terraform) and continuous integration/deployment (GitHub Actions). The key innovation is the ability to perform real infrastructure changes while maintaining 100% application availability.
+This project implements a **production-grade, zero-downtime infrastructure update system** on AWS ECS with EC2 using Infrastructure as Code (Terraform) and continuous integration/deployment (GitHub Actions). The key innovation is the ability to perform **true infrastructure changes** (AMI updates, instance type upgrades, capacity scaling) while maintaining 100% application availability.
 
 ## Architecture Diagram
 
 ```
-GitHub Repository (Terraform Changes)
+GitHub Repository (Infrastructure Changes)
        ↓
 GitHub Actions (Zero-Downtime Workflow)
        ↓                    ↓
 Terraform (Infrastructure)  Continuous Monitoring
        ↓                    ↓
-ECS Fargate Cluster ←→ Real-time Availability Checks
+Auto Scaling Groups    ←→   Real-time Availability Checks
        ↓                    ↓
-Serverless Containers ←→ Application Load Balancer
+EC2 Instance Refresh   ←→   Application Load Balancer
        ↓                    ↓
-Auto-scaling Services      Blue/Green Target Groups
+ECS Services on EC2    ←→   Dynamic Port Mapping
 ```
 
 ## Core Components
@@ -25,13 +25,13 @@ Auto-scaling Services      Blue/Green Target Groups
 ### 1. Infrastructure as Code (Terraform)
 **Location**: `terraform/` directory
 **Modules**: 
-- **Network**: VPC, subnets, security groups for Fargate
+- **Network**: VPC, subnets, security groups for EC2 instances
 - **ECR**: Container registry for Docker images  
-- **Traffic**: Application Load Balancer with Blue/Green target groups
-- **Cluster**: ECS Fargate cluster configuration
-- **Compute**: Auto Scaling Group (for hybrid EC2/Fargate scenarios)
-- **ECS Service**: Fargate task definitions, service configuration  
-- **CodeDeploy**: Blue/Green deployment automation (prepared for future use)
+- **Traffic**: Application Load Balancer with dynamic port mapping support
+- **Cluster**: ECS cluster configuration for EC2 launch type
+- **Compute**: **Auto Scaling Group with instance refresh** (the key to zero-downtime)
+- **ECS Service**: EC2 task definitions, dynamic port mapping, service configuration  
+- **CodeDeploy**: Blue/Green deployment automation for ECS
 
 ### 2. Containerized Application
 **Location**: `app/` directory

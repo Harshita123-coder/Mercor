@@ -1,4 +1,4 @@
-name: Infrastructure Update - Zero Downtime
+name: EC2 Infrastructure Update - Zero Downtime
 
 on:
   push:
@@ -8,15 +8,15 @@ on:
   workflow_dispatch:  # Allow manual trigger
     inputs:
       update_type:
-        description: 'Type of infrastructure update'
+        description: 'Type of EC2 infrastructure update'
         required: true
-        default: 'variable_changes'
+        default: 'instance_type_upgrade'
         type: choice
         options:
-          - variable_changes
-          - scaling_test
-          - service_update
-          - health_check_test
+          - instance_type_upgrade
+          - capacity_scaling  
+          - ami_update
+          - configuration_change
 
 env:
   AWS_REGION: us-east-1

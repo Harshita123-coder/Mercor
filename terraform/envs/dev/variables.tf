@@ -30,23 +30,27 @@ variable "health_path" {
 }
 
 variable "instance_type" {
-  type    = string
-  default = "t3.large"  # DEMO: Upgraded to t3.large for performance demonstration
+  type        = string
+  default     = "t3.small"  # Start with small for infrastructure upgrade demo
+  description = "EC2 instance type - change this to demonstrate zero-downtime infrastructure updates"
 }
 
 variable "desired_capacity" {
-  type    = number
-  default = 2  # VERIFICATION: Scale down to 2 instances to test zero-downtime scaling
+  type        = number
+  default     = 2  # Start with 2 instances
+  description = "Desired number of EC2 instances in Auto Scaling Group"
 }
 
 variable "max_capacity" {
-  type    = number
-  default = 8  # DEMO: Increased max capacity for enterprise-grade scaling
+  type        = number
+  default     = 6  # Allow scaling up to 6 for demonstration
+  description = "Maximum number of EC2 instances in Auto Scaling Group"
 }
 
 variable "ami_id" {
-  type    = string
-  default = null # set to roll new AMI
+  type        = string
+  default     = null # Will use latest ECS-optimized AMI
+  description = "Specific AMI ID to use - set to force AMI updates for zero-downtime demo"
 }
 
 variable "ecr_repo_name" {

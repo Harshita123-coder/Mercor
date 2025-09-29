@@ -37,6 +37,7 @@ resource "aws_lb_target_group" "blue" {
     interval            = 10
     healthy_threshold   = 2
     unhealthy_threshold = 3
+    port                = "traffic-port"  # For dynamic port mapping
   }
 }
 
@@ -48,6 +49,14 @@ resource "aws_lb_target_group" "green" {
   target_type = "instance"
   
   health_check {
+    path                = var.health_path
+    matcher             = "200-399"
+    interval            = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    port                = "traffic-port"  # For dynamic port mapping
+  }
+}
     path                = var.health_path
     matcher             = "200-399"
     interval            = 10
