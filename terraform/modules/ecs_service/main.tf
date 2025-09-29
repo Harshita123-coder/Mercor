@@ -47,18 +47,18 @@ resource "aws_ecs_task_definition" "task" {
   }])
 }
 
-# ECS service with standard deployment (temporary for demo)
+# ECS service with CodeDeploy controller for blue/green deployments
 resource "aws_ecs_service" "svc" {
   name            = "${var.name_prefix}-svc"
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.task.arn
-  desired_count   = 0  # Set to 0 until container instances register
+  desired_count   = 0  # Start with 0 until container instances register
   launch_type     = "EC2"
 
-  # Temporarily use standard ECS deployment
-  # deployment_controller {
-  #   type = "CODE_DEPLOY"
-  # }
+  # Use CodeDeploy for blue/green deployments
+  deployment_controller {
+    type = "CODE_DEPLOY"
+  }
 
   load_balancer {
     target_group_arn = var.tg_blue_arn
