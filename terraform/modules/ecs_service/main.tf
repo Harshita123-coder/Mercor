@@ -35,7 +35,7 @@ resource "aws_ecs_task_definition" "task" {
     image="${var.repo_url}:latest",
     essential=true,
     portMappings=[{containerPort=var.container_port, hostPort=0}], # Dynamic port mapping
-    environment=[{name="APP_MSG", value="Hello from EC2 Blue/Green deployment!"}],
+    environment=[{name="APP_MSG", value="Hello from v5 (green) - Zero Downtime Test!"}],
     logConfiguration={
       logDriver="awslogs",
       options={

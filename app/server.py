@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 PORT = 8080
-MSG = os.environ.get("APP_MSG", "Hello from v4 (blue) - Fixed Container Issue!")
+MSG = os.environ.get("APP_MSG", "Hello from v5 (green) - Zero Downtime Test!")
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
