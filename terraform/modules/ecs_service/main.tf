@@ -52,7 +52,7 @@ resource "aws_ecs_service" "svc" {
   name            = "${var.name_prefix}-svc"
   cluster         = var.cluster_id
   task_definition = aws_ecs_task_definition.task.arn
-  desired_count   = 0  # Start with 0 until container instances register
+  desired_count   = 0  # CodeDeploy manages desired count
   launch_type     = "EC2"
 
   # Use CodeDeploy for blue/green deployments
