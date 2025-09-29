@@ -47,7 +47,7 @@ resource "aws_ecs_task_definition" "task" {
   }])
 }
 
-# ECS service controlled by CodeDeploy (blue TG as prod)
+# ECS service with CodeDeploy controller for blue/green deployments
 resource "aws_ecs_service" "svc" {
   name            = "${var.name_prefix}-svc"
   cluster         = var.cluster_id
@@ -55,7 +55,10 @@ resource "aws_ecs_service" "svc" {
   desired_count   = 2
   launch_type     = "EC2"
 
-  deployment_controller { type = "CODE_DEPLOY" }
+  # Use CodeDeploy for blue/green deployments
+  deployment_controller {
+    type = "CODE_DEPLOY"
+  }
 
   load_balancer {
     target_group_arn = var.tg_blue_arn

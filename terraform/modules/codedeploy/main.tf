@@ -23,10 +23,16 @@ resource "aws_codedeploy_app" "app" {
 }
 
 resource "aws_codedeploy_deployment_group" "dg" {
-  app_name              = aws_codedeploy_app.app.name
-  deployment_group_name = "${var.name_prefix}-dg"
-  service_role_arn      = aws_iam_role.cd_role.arn
+  app_name               = aws_codedeploy_app.app.name
+  deployment_group_name  = "${var.name_prefix}-dg"
+  service_role_arn       = aws_iam_role.cd_role.arn
   deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
+
+  # Required deployment style for ECS
+  deployment_style {
+    deployment_type   = "BLUE_GREEN"
+    deployment_option = "WITH_TRAFFIC_CONTROL"
+  }
 
   ecs_service {
     cluster_name = var.cluster_name
@@ -52,8 +58,10 @@ resource "aws_codedeploy_deployment_group" "dg" {
       action_on_timeout = "CONTINUE_DEPLOYMENT"
     }
     terminate_blue_instances_on_deployment_success {
-      action                         = "TERMINATE"
+      action                           = "TERMINATE"
       termination_wait_time_in_minutes = 1
     }
+    # green_fleet_provisioning_option removed for ECS deployments
+    # ECS manages the green fleet automatically
   }
 }

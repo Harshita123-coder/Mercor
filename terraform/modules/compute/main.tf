@@ -64,8 +64,25 @@ resource "aws_iam_instance_profile" "ecs" {
 locals { 
   userdata = base64encode(<<-EOF
     #!/bin/bash
+    # Set ECS cluster name
     echo 'ECS_CLUSTER=${var.cluster_name}' >> /etc/ecs/ecs.config
-    sudo systemctl restart ecs
+    echo 'ECS_ENABLE_CONTAINER_METADATA=true' >> /etc/ecs/ecs.config
+    
+    # Enable and start the ECS service
+    systemctl enable ecs
+    systemctl start ecs
+    
+    # Wait for ECS agent to be ready
+    sleep 60
+    
+    # Restart ECS to ensure proper cluster connection
+    systemctl restart ecs
+    
+    # Log the status for troubleshooting
+    echo "ECS Agent Status:" > /var/log/ecs-startup.log
+    systemctl status ecs >> /var/log/ecs-startup.log 2>&1
+    echo "ECS Config:" >> /var/log/ecs-startup.log
+    cat /etc/ecs/ecs.config >> /var/log/ecs-startup.log
     EOF
   )
 }
@@ -114,7 +131,7 @@ resource "aws_autoscaling_group" "asg" {
       instance_warmup        = 60
       skip_matching          = true
     }
-    triggers = ["launch_template"]
+    # triggers removed - launch_template changes automatically trigger refresh
   }
 
   lifecycle { 

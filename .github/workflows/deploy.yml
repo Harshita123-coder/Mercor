@@ -95,23 +95,42 @@ jobs:
           echo "TASK_ARN=$TASK_ARN" >> $GITHUB_ENV
           echo "New EC2 task definition: $TASK_ARN"
 
-      - name: Update ECS service with new task definition
+      - name: Deploy using CodeDeploy (Blue/Green)
         env:
           CLUSTER: ${{ steps.infra.outputs.CLUSTER }}
         run: |
-          # Update ECS service to use new task definition
-          echo "Updating ECS service on EC2 with new task definition..."
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "mercor-demo-svc" \
-            --task-definition "$TASK_ARN" \
-            --query 'service.taskDefinition' \
-            --output text
+          echo "🔄 Deploying using CodeDeploy for Blue/Green deployment"
+          
+          # Create CodeDeploy deployment configuration
+          cat > deploy-config.json << EOF
+          {
+            "applicationName": "mercor-demo-cd-app",
+            "deploymentGroupName": "mercor-demo-dg",
+            "revision": {
+              "revisionType": "AppSpecContent",
+              "appSpecContent": {
+                "content": "{\n  \"version\": 0.0,\n  \"Resources\": [\n    {\n      \"TargetService\": {\n        \"Type\": \"AWS::ECS::Service\",\n        \"Properties\": {\n          \"TaskDefinition\": \"$TASK_ARN\",\n          \"LoadBalancerInfo\": {\n            \"ContainerName\": \"app\",\n            \"ContainerPort\": 8080\n          }\n        }\n      }\n    }\n  ]\n}"
+              }
+            },
+            "deploymentConfigName": "CodeDeployDefault.ECSAllAtOnce",
+            "description": "Automated deployment from GitHub Actions"
+          }
+          EOF
+          
+          # Create CodeDeploy deployment
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --cli-input-json file://deploy-config.json \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "📝 CodeDeploy deployment started: $DEPLOYMENT_ID"
+          echo "🔍 Monitor deployment: https://console.aws.amazon.com/codesuite/codedeploy/deployments/$DEPLOYMENT_ID"
 
       - name: Display deployment info
         run: |
-          echo "✅ EC2 Deployment Summary:"
+          echo "✅ CodeDeploy Blue/Green Deployment Summary:"
           echo "🌐 Load Balancer: ${{ steps.infra.outputs.ALB }}"
           echo "🐳 New Task Definition: $TASK_ARN"
-          echo "🏗️  Infrastructure: EC2-based ECS"
-          echo "🎯 Application: Deployed with dynamic port mapping"
+          echo "🏗️  Infrastructure: EC2-based ECS with CodeDeploy"
+          echo "🎯 Deployment: Blue/Green with traffic switching"
+          echo "📊 CodeDeploy App: mercor-demo-cd-app"

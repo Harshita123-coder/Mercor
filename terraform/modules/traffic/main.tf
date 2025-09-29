@@ -57,13 +57,6 @@ resource "aws_lb_target_group" "green" {
     port                = "traffic-port"  # For dynamic port mapping
   }
 }
-    path                = var.health_path
-    matcher             = "200-399"
-    interval            = 10
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-}
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.alb.arn
