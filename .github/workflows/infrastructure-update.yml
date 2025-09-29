@@ -5,11 +5,7 @@ on:
     branches: [ main ]
     paths:
       - "terraform/**"
-  workflow_dispatch:  # Allow          echo ""
-          echo "🚀 Launch Template Details:"
-          aws ec2 describe-launch-templates \
-            --query "LaunchTemplates[?contains(LaunchTemplateName, 'mercor')].{Name:LaunchTemplateName,LatestVersion:LatestVersionNumber,DefaultVersion:DefaultVersionNumber}" \
-            --output tablel trigger
+  workflow_dispatch:  # Allow manual trigger
     inputs:
       update_type:
         description: 'Type of EC2 infrastructure update'
